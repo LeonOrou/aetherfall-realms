@@ -14,6 +14,10 @@ import './styles/main.css';
 
 registerSW({ immediate: true });
 
+const assetBase = `${import.meta.env.BASE_URL}assets`;
+document.documentElement.style.setProperty('--terrain-art-url', `url("${assetBase}/game/terrain-props.webp")`);
+document.documentElement.style.setProperty('--title-art-url', `url("${assetBase}/title-diorama.webp")`);
+
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div class="shell">
     <header class="topbar">

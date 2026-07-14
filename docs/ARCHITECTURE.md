@@ -48,7 +48,9 @@ The AI also submits ordinary commands. It may choose targets heuristically, but 
 
 ## Map and rendering
 
-The world is a 12×10 axial-coordinate parallelogram. `axialToWorld` maps each coordinate to a pointy-top 2D position. Phaser renders each tile as a raised top polygon plus shaded side faces; small procedural terrain markers and miniatures preserve map readability without coupling asset IDs to the rules.
+The world is a 12×10 axial-coordinate parallelogram. `axialToWorld` maps each coordinate to a pointy-top 2D position. Phaser renders each tile as a raised top polygon plus shaded side faces, then layers original painted terrain props and miniatures from two 4×4 atlases. Procedural markers remain as a graceful loading fallback, and rendering IDs never enter the deterministic rules.
+
+Pointer input uses the same pointy-top dimensions as the visible tile. `pointyHexHitArea` translates centered drawing vertices into Phaser's top-left local hit-area space, avoiding rectangular overlap and elevation-offset selection errors.
 
 Rendering consumes only a state snapshot. It never changes resources, movement, fog, combat or turn order. Selection is transient UI state and is not persisted.
 

@@ -19,7 +19,8 @@ This repository is a polished vertical slice. It deliberately favors a complete,
 - Patrolling/chasing monsters that strengthen during the match
 - 30-round score victory using population, territory, discoveries, relics, landmarks, monsters and settlements
 - Autosave, manual local save, and portable JSON export/import
-- Responsive mouse, keyboard and touch controls
+- Responsive mouse, keyboard and touch controls with exact hex-shaped hit areas
+- Original painted 2.5D terrain, settlement, unit, monster and world-site miniatures
 - Installable PWA with offline asset caching
 - GitHub Pages deployment through GitHub Actions
 
@@ -76,7 +77,7 @@ The workflow at `.github/workflows/deploy.yml` tests, builds and deploys every p
 3. In **Repository settings → Pages**, select **GitHub Actions** as the source if GitHub has not selected it automatically.
 4. Watch the **Test, build and deploy** workflow. The site will appear at `https://<username>.github.io/aetherfall-realms/`.
 
-The app has one document route, so browser refreshes do not require an SPA fallback. The service worker precaches the page, code, icons and title art after the first successful visit.
+The app has one document route, so browser refreshes do not require an SPA fallback. The service worker precaches the page, code, icons and production artwork after the first successful visit.
 
 ## Project map
 
@@ -97,5 +98,4 @@ Read [Architecture](docs/ARCHITECTURE.md) for the state transition model and [On
 - The rival AI is intentionally tactical and transparent, not a deep planner.
 - Combat uses one troop group per map banner rather than multi-group army composition.
 - Online multiplayer has an adapter contract and schema proposal, but no credentials or external service are created.
-- Generated title art is original project artwork; the live board uses procedural Phaser miniatures and terrain so rules remain independent of the art pipeline.
-
+- All generated title, terrain and miniature art is original project artwork. Rendering IDs remain separate from the deterministic rules so the art pipeline can evolve safely.

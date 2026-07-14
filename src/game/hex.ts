@@ -1,5 +1,16 @@
 import type { HexCoord } from './types';
 
+export interface Point {
+  x: number;
+  y: number;
+}
+
+export interface HexHitArea {
+  width: number;
+  height: number;
+  points: Point[];
+}
+
 export const HEX_DIRECTIONS: readonly HexCoord[] = [
   { q: 1, r: 0 },
   { q: 1, r: -1 },
@@ -47,4 +58,22 @@ export function axialToWorld(coord: HexCoord, size: number): { x: number; y: num
     x: size * Math.sqrt(3) * (coord.q + coord.r / 2),
     y: size * 1.5 * coord.r
   };
+}
+
+/**
+ * Returns a pointy-top hex polygon in local GameObject coordinates.
+ * Phaser hit areas are measured from an object's top-left, not its origin,
+ * so the centered drawing vertices must be translated into this space.
+ */
+export function pointyHexHitArea(size: number): HexHitArea {
+  const width = Math.sqrt(3) * size;
+  const height = size * 2;
+  const points = Array.from({ length: 6 }, (_, index) => {
+    const angle = ((60 * index - 30) * Math.PI) / 180;
+    return {
+      x: Math.cos(angle) * size + width / 2,
+      y: Math.sin(angle) * size + height / 2
+    };
+  });
+  return { width, height, points };
 }

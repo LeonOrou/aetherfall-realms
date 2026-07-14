@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { TERRAINS } from '../game/data';
-import { axialToWorld, hexKey, sameHex } from '../game/hex';
+import { axialToWorld, hexKey, pointyHexHitArea, sameHex } from '../game/hex';
 import type { Army, GameState, HexCoord, HexTile, PlayerId, Settlement, WorldSite } from '../game/types';
 import { eventBus } from './EventBus';
 
@@ -8,6 +8,34 @@ const HEX_SIZE = 42;
 const ELEVATION_STEP = 6;
 const WORLD_OFFSET_X = 100;
 const WORLD_OFFSET_Y = 110;
+const ART_BASE = `${import.meta.env.BASE_URL}assets/game`;
+
+const TERRAIN_FRAMES: Record<HexTile['terrain'], number> = {
+  grassland: 0,
+  forest: 1,
+  hills: 2,
+  mountain: 3,
+  lake: 4,
+  swamp: 5,
+  crystal: 6,
+  wasteland: 7
+};
+
+const SITE_FRAMES: Record<WorldSite['type'], number> = {
+  village: 2,
+  ruins: 3,
+  lair: 4,
+  shrine: 5,
+  landmark: 6
+};
+
+const UNIT_FRAMES: Record<Army['unitType'], number> = {
+  scout: 7,
+  guardian: 8,
+  ranger: 9,
+  adept: 10,
+  monster: 11
+};
 
 function vertices(size: number, yOffset = 0): Phaser.Geom.Point[] {
   return Array.from({ length: 6 }, (_, index) => {
@@ -32,6 +60,11 @@ export class WorldScene extends Phaser.Scene {
 
   constructor() {
     super('WorldScene');
+  }
+
+  preload(): void {
+    this.load.spritesheet('terrain-props', `${ART_BASE}/terrain-props.webp`, { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('world-pieces', `${ART_BASE}/world-pieces.webp`, { frameWidth: 256, frameHeight: 256 });
   }
 
   create(): void {
@@ -156,8 +189,12 @@ export class WorldScene extends Phaser.Scene {
     }
     this.board.add(graphics);
 
-    const zone = this.add.zone(position.x, position.y, HEX_SIZE * 1.72, HEX_SIZE * 1.5)
-      .setInteractive(new Phaser.Geom.Polygon(top), Phaser.Geom.Polygon.Contains);
+    const hitArea = pointyHexHitArea(HEX_SIZE - 1);
+    const hitPolygon = new Phaser.Geom.Polygon(hitArea.points.map((point) => new Phaser.Geom.Point(point.x, point.y)));
+    const zone = this.add.zone(position.x, position.y, hitArea.width, hitArea.height)
+      .setOrigin(0.5)
+      .setInteractive(hitPolygon, Phaser.Geom.Polygon.Contains);
+    if (zone.input) zone.input.cursor = 'pointer';
     zone.on('pointerup', () => {
       if (!this.dragged) eventBus.emit('hex-selected', { ...tile.coord });
     });
@@ -172,10 +209,25 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private drawTerrainFeature(tile: HexTile, x: number, y: number, visible: boolean): void {
-    if (!this.board || !visible) return;
+    if (!this.board || !this.state || !visible) return;
+    const variant = Math.abs(tile.coord.q * 31 + tile.coord.r * 17) % 2;
+    if (this.textures.exists('terrain-props')) {
+      const terrain = tile.forestUntil && tile.forestUntil >= this.state.round ? 'forest' : tile.terrain;
+      const art = this.add.sprite(x, y - 8, 'terrain-props', TERRAIN_FRAMES[terrain] + variant * 8)
+        .setDisplaySize(76, 76)
+        .setOrigin(0.5, 0.62);
+      if (variant === 1) art.setFlipX(true);
+      this.board.add(art);
+      if (terrain === 'lake') {
+        this.tweens.add({ targets: art, alpha: 0.82, scaleX: art.scaleX * 1.025, duration: 1600, yoyo: true, repeat: -1 });
+      } else if (terrain === 'crystal') {
+        this.tweens.add({ targets: art, alpha: 0.72, duration: 1150, yoyo: true, repeat: -1 });
+      }
+      return;
+    }
     const feature = this.add.graphics();
     feature.setPosition(x, y - 5);
-    const variant = Math.abs(tile.coord.q * 31 + tile.coord.r * 17) % 3;
+    const fallbackVariant = Math.abs(tile.coord.q * 31 + tile.coord.r * 17) % 3;
     if (tile.terrain === 'forest' || tile.forestUntil) {
       for (const offset of [-15, 0, 15]) {
         feature.fillStyle(0x243f31, 1);
@@ -197,7 +249,7 @@ export class WorldScene extends Phaser.Scene {
       feature.fillEllipse(12, 5, 24, 14);
     } else if (tile.terrain === 'lake') {
       feature.lineStyle(2, 0x9edce6, 0.65);
-      feature.beginPath(); feature.arc(0, 2, 18 + variant * 2, 0.2, 2.8); feature.strokePath();
+      feature.beginPath(); feature.arc(0, 2, 18 + fallbackVariant * 2, 0.2, 2.8); feature.strokePath();
       feature.beginPath(); feature.arc(0, 7, 27, 3.3, 5.7); feature.strokePath();
     } else if (tile.terrain === 'crystal') {
       for (const [ox, height] of [[-12, 21], [0, 32], [13, 18]] as [number, number][]) {
@@ -218,13 +270,23 @@ export class WorldScene extends Phaser.Scene {
       feature.lineBetween(4, 10, 13, 1); feature.lineBetween(13, 1, 25, 4);
     } else {
       feature.fillStyle(0xd0b45c, 0.8);
-      for (let offset = -12; offset <= 12; offset += 8) feature.fillRect(offset, -2 + variant, 2, 14);
+      for (let offset = -12; offset <= 12; offset += 8) feature.fillRect(offset, -2 + fallbackVariant, 2, 14);
     }
     this.board.add(feature);
   }
 
   private drawSite(site: WorldSite, x: number, y: number, visible: boolean): void {
     if (!this.board || !visible) return;
+    if (this.textures.exists('world-pieces')) {
+      const glowColor = site.type === 'lair' ? 0xdc665f : site.type === 'shrine' ? 0x77ddeb : site.type === 'landmark' ? 0xf4ca70 : 0xd3c5a2;
+      const glow = this.add.ellipse(x + 19, y - 15, 37, 18, glowColor, 0.2).setStrokeStyle(1, glowColor, 0.75);
+      const art = this.add.sprite(x + 19, y - 23, 'world-pieces', SITE_FRAMES[site.type]).setDisplaySize(49, 49);
+      this.board.add([glow, art]);
+      if (site.type === 'shrine' || site.type === 'landmark') {
+        this.tweens.add({ targets: glow, alpha: 0.05, scale: 1.18, duration: 1200, yoyo: true, repeat: -1 });
+      }
+      return;
+    }
     const marker = this.add.graphics();
     marker.setPosition(x + 22, y - 20);
     const color = site.type === 'lair' ? 0xdc665f : site.type === 'shrine' ? 0x77ddeb : site.type === 'landmark' ? 0xf4ca70 : 0xd3c5a2;
@@ -247,19 +309,29 @@ export class WorldScene extends Phaser.Scene {
     const visible = tile.visibleBy.includes(playerId) || settlement.playerId === playerId;
     if (!visible) return;
     const position = this.tilePosition(tile);
-    const building = this.add.graphics();
-    building.setPosition(position.x, position.y - 12);
     const color = settlement.playerId === 'p1' ? 0x65d5b3 : 0xf0a25e;
-    if (settlement.outpost) {
-      building.fillStyle(0x5d4836, 1); building.fillRect(-2, -25, 4, 28);
-      building.fillStyle(color, 1); building.fillTriangle(2, -24, 19, -18, 2, -12);
+    if (this.textures.exists('world-pieces')) {
+      const shadow = this.add.ellipse(position.x, position.y + 2, 48, 17, 0x05080b, 0.42);
+      const art = this.add.sprite(position.x, position.y - 18, 'world-pieces', settlement.outpost ? 1 : 0)
+        .setDisplaySize(settlement.outpost ? 57 : 70, settlement.outpost ? 57 : 70);
+      const pennant = this.add.graphics().setPosition(position.x + 15, position.y - 27);
+      pennant.fillStyle(0x4a3527, 1).fillRect(-1, -11, 2, 22);
+      pennant.fillStyle(color, 1).fillTriangle(1, -10, 13, -6, 1, -2);
+      this.board.add([shadow, art, pennant]);
     } else {
-      building.fillStyle(0x5f5549, 1); building.fillRect(-18, -10, 36, 20);
-      building.fillStyle(0x2e3440, 1); building.fillTriangle(-23, -10, 0, -31, 23, -10);
-      building.fillStyle(0xffd478, 1); building.fillRect(-4, -5, 8, 9);
-      building.lineStyle(2, color, 1); building.strokeRect(-18, -10, 36, 20);
+      const building = this.add.graphics();
+      building.setPosition(position.x, position.y - 12);
+      if (settlement.outpost) {
+        building.fillStyle(0x5d4836, 1); building.fillRect(-2, -25, 4, 28);
+        building.fillStyle(color, 1); building.fillTriangle(2, -24, 19, -18, 2, -12);
+      } else {
+        building.fillStyle(0x5f5549, 1); building.fillRect(-18, -10, 36, 20);
+        building.fillStyle(0x2e3440, 1); building.fillTriangle(-23, -10, 0, -31, 23, -10);
+        building.fillStyle(0xffd478, 1); building.fillRect(-4, -5, 8, 9);
+        building.lineStyle(2, color, 1); building.strokeRect(-18, -10, 36, 20);
+      }
+      this.board.add(building);
     }
-    this.board.add(building);
     const name = this.add.text(position.x, position.y + 22, settlement.outpost ? settlement.name : `${settlement.name} · ${settlement.population}`, {
       fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px', color: '#fff7da', backgroundColor: '#111923cc', padding: { x: 5, y: 3 }
     }).setOrigin(0.5, 0).setResolution(2);
@@ -276,11 +348,16 @@ export class WorldScene extends Phaser.Scene {
     const miniature = this.add.container(position.x - 18, position.y - 14);
     const flag = this.add.graphics();
     const color = army.playerId === 'p1' ? 0x65d5b3 : army.playerId === 'p2' ? 0xf0a25e : 0xd65454;
-    flag.fillStyle(0x402f25, 1); flag.fillRect(-1, -19, 3, 29);
-    flag.fillStyle(color, 1); flag.fillTriangle(2, -18, 18, -13, 2, -7);
-    flag.lineStyle(1, 0xffffff, 0.5); flag.lineBetween(2, -18, 2, -7);
-    const base = this.add.ellipse(4, 10, 29, 10, 0x0a0e13, 0.6);
-    miniature.add([base, flag]);
+    const base = this.add.ellipse(4, 10, 34, 12, 0x0a0e13, 0.68).setStrokeStyle(1.5, color, 0.9);
+    miniature.add(base);
+    if (this.textures.exists('world-pieces')) {
+      const art = this.add.sprite(4, -8, 'world-pieces', UNIT_FRAMES[army.unitType]).setDisplaySize(52, 52);
+      miniature.add(art);
+    }
+    flag.fillStyle(0x402f25, 1); flag.fillRect(-3, -22, 2, 31);
+    flag.fillStyle(color, 1); flag.fillTriangle(-1, -21, 13, -17, -1, -11);
+    flag.lineStyle(1, 0xffffff, 0.5); flag.lineBetween(-1, -21, -1, -11);
+    miniature.add(flag);
     if (army.unitType === 'adept' || army.playerId === 'monsters') {
       const glow = this.add.circle(7, -6, 5, army.playerId === 'monsters' ? 0xff625d : 0x9beeff, 0.5);
       miniature.add(glow);
